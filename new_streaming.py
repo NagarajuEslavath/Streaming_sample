@@ -31,6 +31,44 @@ def setup_database():
     conn.commit()
     conn.close()
 
+def validate_record(item_id, item_name, quantity):
+    """
+    Validates incoming inventory records.
+    Returns (True, cleaned_data) if valid.
+    Returns (False, error_message) if invalid.
+    """
+
+    # Validate ID
+    if not item_id:
+        return False, "ID cannot be empty"
+
+    item_id = str(item_id).strip()
+
+    # Validate Item Name
+    if not item_name:
+        return False, "Item name cannot be empty"
+
+    item_name = str(item_name).strip()
+
+    if len(item_name) > 255:
+        return False, "Item name exceeds 255 characters"
+
+    # Validate Quantity
+    try:
+        quantity = int(quantity)
+
+        if quantity < 0:
+            return False, "Quantity cannot be negative"
+
+    except ValueError:
+        return False, f"Invalid quantity: {quantity}"
+
+    return True, {
+        "id": item_id,
+        "item_name": item_name,
+        "quantity": quantity
+    }
+
 def upsert_to_sql_server(item_id, item_name, quantity):
     """Executes a high-performance MERGE (Upsert) statement in SQL Server."""
     conn = pyodbc.connect(CONN_STR)
@@ -54,19 +92,68 @@ def upsert_to_sql_server(item_id, item_name, quantity):
     conn.close()
 
 def process_json(file_path):
-    """Parses JSON data for SQL Server."""
-    with open(file_path, 'r') as f:
-        data = json.load(f)
-        upsert_to_sql_server(data["id"], data["item_name"], data["quantity"])
-    print(f"✅ SQL Server updated via JSON: {data['id']}")
+    """Parses and validates JSON data."""
+
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+
+        is_valid, result = validate_record(
+            data.get("id"),
+            data.get("item_name"),
+            data.get("quantity")
+        )
+
+        if not is_valid:
+            print(f"❌ Validation Failed: {result}")
+            return
+
+        upsert_to_sql_server(
+            result["id"],
+            result["item_name"],
+            result["quantity"]
+        )
+
+        print(f"✅ SQL Server updated via JSON: {result['id']}")
+
+    except json.JSONDecodeError:
+        print(f"❌ Invalid JSON format: {file_path}")
+
+    except Exception as e:
+        print(f"❌ JSON Processing Error: {e}")
 
 def process_csv(file_path):
-    """Parses CSV data rows for SQL Server."""
-    with open(file_path, 'r') as f:
-        csv_reader = csv.DictReader(f)
-        for row in csv_reader:
-            upsert_to_sql_server(row["id"], row["item_name"], row["quantity"])
-    print(f"✅ SQL Server updated via CSV: {file_path}")
+    """Parses and validates CSV rows."""
+
+    try:
+        with open(file_path, 'r') as f:
+
+            csv_reader = csv.DictReader(f)
+
+            for row_number, row in enumerate(csv_reader, start=2):
+
+                is_valid, result = validate_record(
+                    row.get("id"),
+                    row.get("item_name"),
+                    row.get("quantity")
+                )
+
+                if not is_valid:
+                    print(
+                        f"❌ CSV Row {row_number} Validation Failed: {result}"
+                    )
+                    continue
+
+                upsert_to_sql_server(
+                    result["id"],
+                    result["item_name"],
+                    result["quantity"]
+                )
+
+        print(f"✅ SQL Server updated via CSV: {file_path}")
+
+    except Exception as e:
+        print(f"❌ CSV Processing Error: {e}")
 
 def process_live_sql_query(file_path):
     """Reads a modified SQL script file and runs it live against SQL Server."""
@@ -130,3 +217,6 @@ def start_folder_watcher():
 if __name__ == "__main__":
     setup_database()
     start_folder_watcher()
+
+
+#successfully running the code 
